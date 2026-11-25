@@ -1,0 +1,13 @@
+# ========================================================
+# PDF Page Extractor Dependencies
+# Python >= 3.10
+# ========================================================
+
+# GUI Framework & PDF Viewer
+PySide6>=6.5.0
+
+# PDF Manipulation & Lossless Page Extraction
+pypdf>=3.17.0
+
+# (Optional) Standalone EXE packaging
+# pyinstaller>=6.0.0
