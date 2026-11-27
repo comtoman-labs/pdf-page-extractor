@@ -25,14 +25,14 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-from PySide6.QtCore import QMargins, QPointF, QSettings, Qt
-from PySide6.QtGui import QColor, QIcon, QKeySequence, QPalette, QShortcut
+from PySide6.QtCore import QEvent, QMargins, QPointF, QSettings, Qt
+from PySide6.QtGui import QColor, QIcon, QKeySequence, QPainter, QPalette, QShortcut
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QMessageBox, QPushButton, QRadioButton, QSpinBox,
-    QStackedLayout, QStackedWidget, QVBoxLayout, QWidget
+    QLineEdit, QMainWindow, QMessageBox, QPushButton, QRadioButton, QSlider,
+    QSpinBox, QStackedLayout, QStackedWidget, QVBoxLayout, QWidget
 )
 from pypdf import PdfReader, PdfWriter
 
@@ -358,6 +358,33 @@ QStatusBar {
     background-color: #1e1e1e;
     color: #cccccc;
 }
+
+/* 밝기 조절 슬라이더 (다크 모드) */
+QSlider::groove:horizontal {
+    border: none;
+    height: 4px;
+    background: #3e3e42;
+    border-radius: 2px;
+}
+QSlider::sub-page:horizontal {
+    background: #0e639c;
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    background: #ffffff;
+    border: 1px solid #0e639c;
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}
+QSlider::handle:horizontal:hover {
+    background: #4ea1f3;
+}
+QSlider::handle:horizontal:disabled {
+    background: #555555;
+    border-color: #444444;
+}
 """
 DARK_STYLE = (
     DARK_STYLE.replace("__ARROW_UP_WHITE__", ICON_PATHS["arrow_up_white.svg"])
@@ -579,6 +606,33 @@ QStatusBar {
     background-color: #e8e8e8;
     color: #333333;
 }
+
+/* 밝기 조절 슬라이더 (라이트 모드) */
+QSlider::groove:horizontal {
+    border: none;
+    height: 4px;
+    background: #d0d0d0;
+    border-radius: 2px;
+}
+QSlider::sub-page:horizontal {
+    background: #0e639c;
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    background: #ffffff;
+    border: 2px solid #0e639c;
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}
+QSlider::handle:horizontal:hover {
+    background: #e2f0fb;
+}
+QSlider::handle:horizontal:disabled {
+    background: #cccccc;
+    border-color: #aaaaaa;
+}
 """
 LIGHT_STYLE = (
     LIGHT_STYLE.replace("__ARROW_UP_BLACK__", ICON_PATHS["arrow_up_black.svg"])
@@ -735,6 +789,42 @@ class BottomControlBar(QWidget):
         self.update_layout()
 
 
+class DimOverlay(QWidget):
+    """PDF 뷰어 위에 반투명 어두운 틴트를 얹어 배경 밝기(눈부심)를 조절하는 오버레이"""
+
+    def __init__(self, target_view: QPdfView):
+        super().__init__(target_view.viewport())
+        self.target_view = target_view
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.dim_alpha = 0
+        self.setStyleSheet("background: transparent;")
+        target_view.viewport().installEventFilter(self)
+        self.update_geometry()
+
+    def eventFilter(self, obj, event):
+        if obj == self.target_view.viewport() and event.type() in (
+            QEvent.Type.Resize,
+            QEvent.Type.Show,
+            QEvent.Type.LayoutRequest,
+        ):
+            self.update_geometry()
+        return super().eventFilter(obj, event)
+
+    def update_geometry(self):
+        self.setGeometry(self.target_view.viewport().rect())
+
+    def set_brightness(self, percent: int):
+        clamped = max(20, min(100, percent))
+        # 100% -> alpha 0 (원본 그대로), 20% -> alpha 약 180 (부드러운 다크 페이퍼)
+        self.dim_alpha = int((100 - clamped) * 2.55 * 0.88)
+        self.update()
+
+    def paintEvent(self, event):
+        if self.dim_alpha > 0:
+            painter = QPainter(self)
+            painter.fillRect(self.rect(), QColor(0, 0, 0, self.dim_alpha))
+
+
 class PdfExtractorWindow(QMainWindow):
     """PDF Page Extractor 메인 윈도우"""
 
@@ -764,6 +854,14 @@ class PdfExtractorWindow(QMainWindow):
             initial_dark = (saved == "true" or saved is True)
 
         self.apply_theme(initial_dark)
+
+        # 문서 밝기 설정 복원
+        saved_bright = settings.value("document_brightness", 100)
+        try:
+            bright_val = int(saved_bright)
+        except (ValueError, TypeError):
+            bright_val = 100
+        self.brightness_slider.setValue(bright_val)
 
         # 드래그 앤 드롭 활성화
         self.setAcceptDrops(True)
@@ -830,6 +928,33 @@ class PdfExtractorWindow(QMainWindow):
         self.btn_toggle_page_mode.setToolTip("한쪽 보기 / 두쪽 보기 전환 (Ctrl+D)")
         self.btn_toggle_page_mode.setEnabled(False)
 
+        # 밝기 조절 (눈부심 방지 틴트) 슬라이더 박스
+        self.brightness_box = QWidget()
+        self.brightness_box.setObjectName("brightnessBox")
+        self.brightness_box.setFixedHeight(30)
+        bright_layout = QHBoxLayout(self.brightness_box)
+        bright_layout.setContentsMargins(6, 0, 8, 0)
+        bright_layout.setSpacing(6)
+
+        self.brightness_icon = QLabel("☀️")
+        self.brightness_icon.setToolTip("문서 밝기 (클릭 시 100% 초기화)")
+        self.brightness_icon.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        self.brightness_slider = QSlider(Qt.Orientation.Horizontal)
+        self.brightness_slider.setRange(20, 100)
+        self.brightness_slider.setValue(100)
+        self.brightness_slider.setFixedWidth(85)
+        self.brightness_slider.setToolTip("눈부심 방지 문서 밝기 조절 (20% ~ 100%)")
+        self.brightness_slider.setEnabled(False)
+
+        self.brightness_label = QLabel("100%")
+        self.brightness_label.setFixedWidth(36)
+        self.brightness_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        bright_layout.addWidget(self.brightness_icon)
+        bright_layout.addWidget(self.brightness_slider)
+        bright_layout.addWidget(self.brightness_label)
+
         # 다크 / 라이트 모드 전환 토글 버튼 (우측 상단)
         self.btn_theme = QPushButton()
         self.btn_theme.setObjectName("themeButton")
@@ -843,6 +968,8 @@ class PdfExtractorWindow(QMainWindow):
         zoom_layout.addWidget(self.btn_fit_view)
         zoom_layout.addWidget(self.btn_fit_width)
         zoom_layout.addWidget(self.btn_toggle_page_mode)
+        zoom_layout.addSpacing(6)
+        zoom_layout.addWidget(self.brightness_box)
         zoom_layout.addSpacing(6)
         zoom_layout.addWidget(self.btn_theme)
 
@@ -914,6 +1041,10 @@ class PdfExtractorWindow(QMainWindow):
 
         self.spread_layout.addWidget(self.pdf_view_left)
         self.spread_layout.addWidget(self.right_container)
+
+        # PDF 뷰어 딤(Dim) 오버레이 (문서 눈부심 방지 밝기 조절)
+        self.overlay_left = DimOverlay(self.pdf_view_left)
+        self.overlay_right = DimOverlay(self.pdf_view_right)
 
         # viewer_layout: 좌우 스트레치로 감싸 두쪽 보기 시 정중앙에 밀착 배치
         self.viewer_layout.addStretch(1)
@@ -1122,6 +1253,14 @@ class PdfExtractorWindow(QMainWindow):
             bg_color = "#1e1e1e" if dark else "#f3f3f3"
             self.right_empty.setStyleSheet(f"background-color: {bg_color};")
 
+        # 밝기 컨트롤 박스 스타일 동기화
+        if hasattr(self, "brightness_box"):
+            box_bg = "#252526" if dark else "#e8e8e8"
+            box_border = "#3e3e42" if dark else "#cccccc"
+            self.brightness_box.setStyleSheet(
+                f"#brightnessBox {{ background-color: {box_bg}; border: 1px solid {box_border}; border-radius: 4px; }}"
+            )
+
         # 상태 갱신
         self.update_range_count()
         if self.custom_input.text():
@@ -1154,6 +1293,10 @@ class PdfExtractorWindow(QMainWindow):
         self.btn_fit_width.clicked.connect(self.fit_width)
         self.btn_toggle_page_mode.clicked.connect(self.toggle_page_mode)
         self.btn_theme.toggled.connect(self.apply_theme)
+
+        # 문서 밝기 슬라이더 (눈부심 방지)
+        self.brightness_slider.valueChanged.connect(self.on_brightness_changed)
+        self.brightness_icon.mousePressEvent = lambda e: self.brightness_slider.setValue(100) if self.brightness_slider.isEnabled() else None
 
         # 범위 추출 컨트롤
         self.btn_set_start.clicked.connect(self.set_current_as_start)
@@ -1326,6 +1469,7 @@ class PdfExtractorWindow(QMainWindow):
         self.btn_fit_view.setEnabled(enabled)
         self.btn_fit_width.setEnabled(enabled)
         self.btn_toggle_page_mode.setEnabled(enabled)
+        self.brightness_slider.setEnabled(enabled)
 
         self.mode_combo.setEnabled(enabled)
 
@@ -1576,6 +1720,16 @@ class PdfExtractorWindow(QMainWindow):
         self.pdf_view_left.setZoomFactor(self.zoom_factor)
         self.pdf_view_right.setZoomFactor(self.zoom_factor)
         self.statusBar().showMessage(f"축소: {int(self.zoom_factor * 100)}%", 2000)
+
+    def on_brightness_changed(self, value: int):
+        """문서 밝기 슬라이더 값 변경 시 오버레이 투명도 및 라벨 업데이트"""
+        self.brightness_label.setText(f"{value}%")
+        if hasattr(self, "overlay_left"):
+            self.overlay_left.set_brightness(value)
+        if hasattr(self, "overlay_right"):
+            self.overlay_right.set_brightness(value)
+        settings = QSettings("PdfPageExtractor", "Settings")
+        settings.setValue("document_brightness", value)
 
     # -------------------------------------------------------------
     # 모드 0: 연속 범위 설정

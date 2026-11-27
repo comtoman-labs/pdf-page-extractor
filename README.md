@@ -6,6 +6,14 @@
 
 ---
 
+## 🖥️ 프로그램 실행 화면
+
+<p align="center">
+  <img src="doc/screenshot.png" alt="PDF Page Extractor 실행 화면" width="100%">
+</p>
+
+---
+
 ## 🌟 주요 특징 및 차별점
 
 ### 1. 🔒 100% 로컬 오프라인 무손실(Lossless) 처리
@@ -20,6 +28,7 @@
 ### 3. 🖼️ 모던 PDF 뷰어 내장 (PySide6 QtPdf)
 * 무거운 외부 PDF 뷰어(Acrobat 등)를 켤 필요 없이, 프로그램 내에서 페이지를 선명하게 미리보며 작업할 수 있습니다.
 * **📖 두쪽 보기 / 📄 한쪽 보기 (`Ctrl + D`)**: 실제 책처럼 두 페이지를 스크롤바 없이 가깝게 나란히 놓고 비교할 수 있는 듀얼 스프레드 뷰를 지원합니다.
+* **☀️ 눈부심 방지 문서 밝기 조절**: 상단 툴바의 전용 슬라이더로 흰 배경 눈부심을 20%~100%까지 자유롭게 톤다운하며, 설정이 영구 보존됩니다.
 * **화면 맞춤 (FitInView)**, **너비 맞춤 (FitToWidth)**, **실시간 확대/축소 (Zoom)** 지원
 
 ### 4. 🌓 다크 모드 / 라이트 모드 (Dark & Light Theme) 지원
@@ -76,6 +85,8 @@ python main.py
 
 ```text
 pdf-page-extractor/
+├── doc/
+│   └── screenshot.png   # 프로그램 실행 화면 스크린샷
 ├── main.py              # 프로그램 엔트리포인트 및 GUI, 추출 로직
 ├── test_extractor.py    # 페이지 파싱 및 범위 유효성 검사 단위 테스트 스위트
 ├── icon.ico             # 프로그램 창 및 단독 실행 파일 전용 아이콘
